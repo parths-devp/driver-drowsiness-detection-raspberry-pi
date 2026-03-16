@@ -1,21 +1,20 @@
 import cv2
+import RPi.GPIO as GPIO
 import mediapipe as mp
 import numpy as np
 import time
 from picamera2 import Picamera2
-import RPi.GPIO as GPIO
 
-
-BUZZER_PIN = 18
-
-GPIO.setmode(GPIO.BCM)
-GPIO.setup(BUZZER_PIN, GPIO.OUT)
-
-buzzer = GPIO.PWM(BUZZER_PIN, 2500)
-buzzer.start(0)
+print("Starting Drowsiness Detection System")
 
 mp_face = mp.solutions.face_mesh
 face_mesh = mp_face.FaceMesh(max_num_faces=1)
+
+picam2 = Picamera2()
+picam2.configure(picam2.create_preview_configuration())
+picam2.start()
+
+print("Camera started")
 
 LEFT_EYE = [33, 160, 158, 133, 153, 144]
 RIGHT_EYE = [362, 385, 387, 263, 373, 380]
@@ -25,16 +24,15 @@ DROWSINESS_THRESHOLD = 2.0
 
 closed_frames = 0
 
+BUZZER_PIN = 18
 
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(BUZZER_PIN, GPIO.OUT)
 
-picam2 = Picamera2()
-picam2.configure(
-    picam2.create_preview_configuration(
-        main={"format": "RGB888", "size": (640, 480)}
-    )
-)
-picam2.start()
+buzzer = GPIO.PWM(BUZZER_PIN, 2500)
+buzzer.start(0)
 
+print("Buzzer initialized")
 
 
 def calculate_ear(landmarks, eye_indices):
@@ -46,101 +44,75 @@ def calculate_ear(landmarks, eye_indices):
     p5 = np.array([landmarks[eye_indices[4]].x, landmarks[eye_indices[4]].y])
     p6 = np.array([landmarks[eye_indices[5]].x, landmarks[eye_indices[5]].y])
 
-    vertical1 = np.linalg.norm(p2 - p6)
-    vertical2 = np.linalg.norm(p3 - p5)
-    horizontal = np.linalg.norm(p1 - p4)
+    vertical_dist1 = np.linalg.norm(p2 - p6)
+    vertical_dist2 = np.linalg.norm(p3 - p5)
+    horizontal_dist = np.linalg.norm(p1 - p4)
 
-    ear = (vertical1 + vertical2) / (2 * horizontal)
+    ear = (vertical_dist1 + vertical_dist2) / (2 * horizontal_dist)
+
     return ear
-
 
 
 prev_time = time.time()
 
-try:
+while True:
 
-    while True:
+    frame = picam2.capture_array()
+    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    frame = cv2.flip(frame, 1)
 
-        frame = picam2.capture_array()
-        frame = cv2.flip(frame, 1)
+    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    result = face_mesh.process(rgb)
 
-        rgb = frame
-        result = face_mesh.process(rgb)
+    current_time = time.time()
+    frame_fps = 1 / (current_time - prev_time) if current_time != prev_time else 30
+    prev_time = current_time
 
-        current_time = time.time()
-        fps = 1 / (current_time - prev_time)
-        prev_time = current_time
+    drowsiness_detected = False
+    left_ear = 0
+    right_ear = 0
 
-        drowsiness_detected = False
-        left_ear = 0
-        right_ear = 0
+    print("Frame processed")
 
-        if result.multi_face_landmarks:
+    if result.multi_face_landmarks:
 
-            face = result.multi_face_landmarks[0]
-            landmarks = face.landmark
+        print("Face detected")
 
-            left_ear = calculate_ear(landmarks, LEFT_EYE)
-            right_ear = calculate_ear(landmarks, RIGHT_EYE)
+        face = result.multi_face_landmarks[0]
+        landmarks = face.landmark
 
-            avg_ear = (left_ear + right_ear) / 2
+        left_ear = calculate_ear(landmarks, LEFT_EYE)
+        right_ear = calculate_ear(landmarks, RIGHT_EYE)
 
-            if avg_ear < EAR_THRESHOLD:
+        avg_ear = (left_ear + right_ear) / 2
 
-                closed_frames += 1
-                closed_time = closed_frames / fps
+        print("EAR:", avg_ear)
 
-                if closed_time >= DROWSINESS_THRESHOLD:
-                    drowsiness_detected = True
+        if avg_ear < EAR_THRESHOLD:
 
-            else:
-                closed_frames = 0
+            closed_frames += 1
+            closed_time = closed_frames / frame_fps
 
-    
+            if closed_time >= DROWSINESS_THRESHOLD:
 
-        if drowsiness_detected:
-
-            for freq in range(2500, 5000, 50):
-                buzzer.ChangeFrequency(freq)
-                buzzer.ChangeDutyCycle(50)
-                time.sleep(0.003)
-
-            for freq in range(5000, 2500, -50):
-                buzzer.ChangeFrequency(freq)
-                buzzer.ChangeDutyCycle(50)
-                time.sleep(0.003)
+                print("DROWSINESS DETECTED")
+                drowsiness_detected = True
 
         else:
-            buzzer.ChangeDutyCycle(0)
+            closed_frames = 0
 
-        
+    if drowsiness_detected:
 
-        cv2.putText(frame, f"Left EAR: {left_ear:.2f}", (20,30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,0),2)
+        for freq in range(2500, 5000, 50):
+            buzzer.ChangeFrequency(freq)
+            buzzer.ChangeDutyCycle(50)
+            time.sleep(0.003)
 
-        cv2.putText(frame, f"Right EAR: {right_ear:.2f}", (20,60),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,0),2)
+        for freq in range(5000, 2500, -50):
+            buzzer.ChangeFrequency(freq)
+            buzzer.ChangeDutyCycle(50)
+            time.sleep(0.003)
 
-        cv2.putText(frame, f"FPS: {int(fps)}", (20,90),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,0),2)
+    else:
 
-        if drowsiness_detected:
-            cv2.putText(frame, "DROWSY!", (300,50),
-                        cv2.FONT_HERSHEY_SIMPLEX,1,(0,0,255),3)
-        else:
-            cv2.putText(frame, "Awake", (300,50),
-                        cv2.FONT_HERSHEY_SIMPLEX,1,(0,255,0),2)
-
-        cv2.imshow("Drowsiness Detection", frame)
-
-        if cv2.waitKey(1) & 0xFF == 27:
-            break
-
-except KeyboardInterrupt:
-    pass
-
-finally:
-
-    buzzer.stop()
-    GPIO.cleanup()
-    cv2.destroyAllWindows()
+        buzzer.ChangeDutyCycle(0)
