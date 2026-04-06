@@ -3,15 +3,21 @@ import RPi.GPIO as GPIO
 import mediapipe as mp
 import numpy as np
 import time
+import os
 from picamera2 import Picamera2
 
 print("Starting Drowsiness Detection System")
+
+
+GUI = "DISPLAY" in os.environ
+print("GUI Mode:", GUI)
 
 mp_face = mp.solutions.face_mesh
 face_mesh = mp_face.FaceMesh(max_num_faces=1)
 
 picam2 = Picamera2()
-picam2.configure(picam2.create_preview_configuration())
+config = picam2.create_preview_configuration(main={"size": (640, 480)})
+picam2.configure(config)
 picam2.start()
 
 print("Camera started")
@@ -58,7 +64,6 @@ prev_time = time.time()
 while True:
 
     frame = picam2.capture_array()
-    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     frame = cv2.flip(frame, 1)
 
     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -88,6 +93,20 @@ while True:
 
         print("EAR:", avg_ear)
 
+        h, w, _ = frame.shape
+
+        
+        if GUI:
+            for idx in LEFT_EYE:
+                x = int(landmarks[idx].x * w)
+                y = int(landmarks[idx].y * h)
+                cv2.circle(frame, (x, y), 2, (0, 255, 255), -1)
+
+            for idx in RIGHT_EYE:
+                x = int(landmarks[idx].x * w)
+                y = int(landmarks[idx].y * h)
+                cv2.circle(frame, (x, y), 2, (0, 255, 255), -1)
+
         if avg_ear < EAR_THRESHOLD:
 
             closed_frames += 1
@@ -103,6 +122,11 @@ while True:
 
     if drowsiness_detected:
 
+        if GUI:
+            cv2.putText(frame, "DROWSY!", (200, 200),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1,
+                        (0, 0, 255), 3)
+
         for freq in range(2500, 5000, 50):
             buzzer.ChangeFrequency(freq)
             buzzer.ChangeDutyCycle(50)
@@ -116,3 +140,21 @@ while True:
     else:
 
         buzzer.ChangeDutyCycle(0)
+
+        if GUI:
+            cv2.putText(frame, "Awake", (20, 40),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1,
+                        (0, 255, 0), 2)
+
+    
+    if GUI:
+        cv2.imshow("Drowsiness Detection", frame)
+
+        if cv2.waitKey(1) & 0xFF == 27:
+            break
+
+
+if GUI:
+    cv2.destroyAllWindows()
+
+GPIO.cleanup()
