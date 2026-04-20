@@ -3,7 +3,7 @@ import mediapipe as mp
 import numpy as np
 import time
 import serial
-
+import os 
 
 mp_face = mp.solutions.face_mesh
 face_mesh = mp_face.FaceMesh(max_num_faces=1)
