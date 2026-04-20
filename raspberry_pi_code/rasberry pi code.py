@@ -8,7 +8,7 @@ from picamera2 import Picamera2
 
 print("Starting Drowsiness Detection System")
 
-
+# Detect if GUI available
 GUI = "DISPLAY" in os.environ
 print("GUI Mode:", GUI)
 
@@ -76,12 +76,9 @@ while True:
     drowsiness_detected = False
     left_ear = 0
     right_ear = 0
-
-    print("Frame processed")
+    closed_time_display = 0
 
     if result.multi_face_landmarks:
-
-        print("Face detected")
 
         face = result.multi_face_landmarks[0]
         landmarks = face.landmark
@@ -91,11 +88,10 @@ while True:
 
         avg_ear = (left_ear + right_ear) / 2
 
-        print("EAR:", avg_ear)
+        print("Left EAR:", left_ear, "Right EAR:", right_ear)
 
         h, w, _ = frame.shape
 
-        
         if GUI:
             for idx in LEFT_EYE:
                 x = int(landmarks[idx].x * w)
@@ -111,6 +107,7 @@ while True:
 
             closed_frames += 1
             closed_time = closed_frames / frame_fps
+            closed_time_display = closed_time
 
             if closed_time >= DROWSINESS_THRESHOLD:
 
@@ -119,6 +116,17 @@ while True:
 
         else:
             closed_frames = 0
+
+    if GUI:
+
+        cv2.putText(frame, f"Left EAR: {left_ear:.2f}", (20, 40),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+        cv2.putText(frame, f"Right EAR: {right_ear:.2f}", (20, 70),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+        cv2.putText(frame, f"Closed Time: {closed_time_display:.2f}s", (20, 100),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
     if drowsiness_detected:
 
@@ -142,11 +150,10 @@ while True:
         buzzer.ChangeDutyCycle(0)
 
         if GUI:
-            cv2.putText(frame, "Awake", (20, 40),
+            cv2.putText(frame, "Awake", (20, 140),
                         cv2.FONT_HERSHEY_SIMPLEX, 1,
                         (0, 255, 0), 2)
 
-    
     if GUI:
         cv2.imshow("Drowsiness Detection", frame)
 
